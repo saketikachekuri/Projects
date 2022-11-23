@@ -1,0 +1,116 @@
+% All calculations are assuming type = NMOS
+%% Change parameters here
+idx = 1;
+
+u_n_fixed = 200e-4; % Ball-park figure for constant mu calculations
+
+%% Values
+L_arr = [1, 0.5, 0.35];
+tox_arr = [20, 10, 7];
+% From graph
+VDD_arr = [5, 3.5, 3];
+Vth_arr = [0.8, 0.55, 0.5];
+
+% Converting to given units
+L = L_arr(idx) * 10^(-6);
+tox = tox_arr(idx) * 10^(-9);
+VDD = VDD_arr(idx);
+Vth = Vth_arr(idx);
+
+%% Constants for reuse
+q = 1.6e-19;
+VT = 0.026;
+eps_0 = 8.854e-12;
+
+eps_r_ox = 3.7;
+eps_ox = eps_r_ox * eps_0;
+
+eps_r_si = 11.7;
+eps_si = eps_r_si * eps_0;
+
+Cox = eps_ox/tox;
+
+n_i = (1.5e10) * 1e6;  % SI units
+Eg = 1.12*q;
+Xs = 4.05;
+
+%% Find NA for given Vt
+
+NA_arr = 10.^(linspace(21, 26, 1000)); %In SI units
+phi_b_arr = VT * log(NA_arr/n_i);
+phi_ms_arr = phi_m - (Xs + Eg/(2*q) + phi_b_arr);
+
+% Assuming no oxide/interface charges, V_fb is phi_ms 
+
+Vth_vals = phi_ms_arr + sqrt(4*q*eps_si*(NA_arr.*phi_b_arr))/(Cox) + 2*phi_b_arr;
+
+NA = interp1(Vth_vals, NA_arr, Vth);
+
+phi_b = VT * log(NA/n_i);
+phi_ms = phi_m - (Xs + Eg/(2*q) + phi_b);
+
+% Sanity check; Vth_calc matched Vth from graph, can use Vth in further
+% calcs
+Vth_calc = phi_ms + sqrt(4*q*eps_si*(NA*phi_b))/(Cox) + 2*phi_b;
+
+% Taking width as 1 um so current is obtained per unit um (other values
+% would just scale it by W, if width is W um
+
+W = 1e-6;
+Wd = sqrt(2*eps_si*2*phi_b/(q*NA));
+Cd = eps_si/Wd;
+m = 1 + Cd/Cox;
+
+Vgs_arr = [2.5 3.5 4.5];
+figure
+
+
+%% Constant mobility model
+for Vgs = Vgs_arr
+
+    Vd_sat = (Vgs - Vth)/m;
+
+    Vds_lin = 0:0.01:Vd_sat;
+    Vds_sat = Vd_sat:0.01:VDD;
+
+    Id_lin = u_n_fixed * Cox * (W/L) * (Vgs - Vth - 0.5*m*Vds_lin) .* Vds_lin;
+    Id_sat = u_n_fixed * Cox * (W/L) * (Vgs - Vth).^2/(2*m) + zeros(size(Vds_sat));
+    plot([Vds_lin Vds_sat], [Id_lin Id_sat]);
+    hold on 
+end
+
+xlabel('$V_{DS}$ (in V)', 'interpreter', 'latex');
+ylabel('$I_{DS}$ (in mA)', 'interpreter', 'latex');
+title(['Constant Mobility IV characteristics for $t_{ox}$ = ', num2str(tox*1e9), ' nm, L = ', num2str(L*1e6),' $\mu$m'], 'interpreter', 'latex');
+legend('$V_{G}$ = 2.5V', '$V_{G}$ = 3.5V', '$V_{G}$ = 4.5V', 'interpreter', 'latex',Location='best');
+grid on
+
+figure
+
+%% Mobility Reduction Effect
+
+for Vgs = Vgs_arr
+
+    Vd_sat = (Vgs - Vth)/m;
+
+    Q_D = Cox * (Vth - phi_ms - 2*phi_b);
+    Q_I = Cox * (Vgs - Vth);
+
+    E_eff = (abs(Q_D) + abs(Q_I)/2)/(eps_si);
+
+    u_eff = E_eff^(-0.3); %% Values of A and n?
+
+    Vds_lin = 0:0.01:Vd_sat;
+    Vds_sat = Vd_sat:0.01:VDD;
+
+    Id_lin = u_eff * Cox * (W/L) * (Vgs - Vth - 0.5*m*Vds_lin) .* Vds_lin;
+    Id_sat = u_eff * Cox * (W/L) * (Vgs - Vth).^2/(2*m) + zeros(size(Vds_sat));
+    plot([Vds_lin Vds_sat], [Id_lin Id_sat]);
+    hold on 
+end
+
+xlabel('$V_{DS}$ (in V)', 'interpreter', 'latex');
+ylabel('$I_{DS}$ (in mA)', 'interpreter', 'latex');
+title(['Vertical Field induced Mobility Degradation IV characteristics for $t_{ox}$ = ', num2str(tox*1e9), ' nm, L = ', num2str(L*1e6),' $\mu$m'], 'interpreter', 'latex');
+legend('$V_{G}$ = 2.5V', '$V_{G}$ = 3.5V', '$V_{G}$ = 4.5V', 'interpreter', 'latex', Location='best');
+grid on

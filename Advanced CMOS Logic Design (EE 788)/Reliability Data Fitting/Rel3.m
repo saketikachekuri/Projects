@@ -1,0 +1,143 @@
+clear all; 
+close all;
+
+filename = "data_assignment_Rel-03.xlsx";
+sheet = 1;
+
+data = readmatrix(filename,'Sheet',sheet);
+data = data(:, 1:10);
+% data(any(isnan(data),2),:) = [];
+
+% From data set
+
+T_vals = [100, 130, 155] + 273;
+Vg_vals = [1.3, 1.5, 1.7];
+
+%% Parameters
+
+t_il = 0.3e-9; 
+t_hk = 2.3e-9;
+
+eps_0 = 8.854e-12;
+
+eps_r_ox = 3.9;
+eps_ox = eps_0 * eps_r_ox;
+
+eps_il = 3.9;
+eps_hk = 25;
+
+EOT = eps_r_ox*(t_il/eps_il + t_hk/eps_hk);
+
+q = 1.6e-19; 
+Kb = 1.380649e-23;
+C_ox = eps_ox/EOT;   
+
+
+stress_times = data(:,1);
+del_NIT = data(:, 2:10);
+del_VT = del_NIT*q/C_ox*1e4; %Given in /cm^2
+
+% n value fixed at 1/6, find other params (skip over NaNs)
+
+n_avg = 1/6;
+
+%% Ea (at fixed Vg)
+
+Ea_vals = zeros(3,length(stress_times));
+
+for Vg_index = 1:3
+    for j = 1:length(stress_times)
+
+        del_VT_arr = del_VT(j, [Vg_index, Vg_index+3, Vg_index + 6]);
+        if (~any(isnan(del_VT_arr)))
+
+            fit_Ea = polyfit(-1*q./(Kb*T_vals), log(del_VT_arr),  1);
+            Ea_vals(Vg_index, j) = fit_Ea(1);
+
+        end
+    end
+end
+
+Ea_vals(Ea_vals ==  0) = nan;
+Ea_avg = mean(Ea_vals, 'all', 'omitnan');
+
+
+%% VAF (at fixed T)
+
+gamma_vals = zeros(3,length(stress_times));
+
+for T_idx = 1:3
+    for i = 1:length(stress_times)
+        del_VT_arr = del_VT(i, (T_idx - 1)*3 + (1:3));
+        if (~any(isnan(del_VT_arr)))
+            fit_gamma = polyfit(log(Vg_vals), log(del_VT_arr),  1);
+            gamma_vals(T_idx, i) = fit_gamma(1);
+        end
+    end
+end
+
+gamma_vals(gamma_vals ==  0) = nan;
+gamma_avg = mean(gamma_vals, 'all', 'omitnan');
+
+
+%% A 
+filename = "data_assignment_Rel-03.xlsx";
+sheet = 1;
+data1 = readmatrix(filename,'Sheet',sheet);
+data1 = data1(:, 1:10);
+data1(any(isnan(data),2),:) = [];
+
+stress_times_new = data1(:,1);  %5x1
+del_NIT_new = data1(:, 2:end);
+del_VT_new = del_NIT_new*q/C_ox*1e4;
+del_VT_func = @(A, Vg, gamma, Ea, T, n, stress_times_new) A .* kron(exp(-q * Ea./(Kb*T)) , Vg.^gamma) .*  stress_times_new.^n;
+
+optim_func = @(params) norm((del_VT_func(params(1), Vg_vals, gamma_avg, Ea_avg, T_vals, n_avg, stress_times_new) - del_VT_new));
+
+param_guess = 0.02;
+options = optimset('PlotFcns',@optimplotfval,'TolFun',1e-6,'TolX',1e-6);
+% options = optimset('PlotFcns',@optimplotfval,'MaxFunEvals', 1e30, 'Maxiter', 1e30);
+A_avg = fminsearch(optim_func, param_guess, options);
+
+
+disp("Fit Parameters found: ");
+A_avg
+gamma_avg 
+Ea_avg
+n_avg
+
+%% Plotting
+
+data_fitted = del_VT_func(A_avg, Vg_vals, gamma_avg, Ea_avg, T_vals, n_avg, stress_times);
+
+figure;
+
+Vg_vals = [Vg_vals Vg_vals];
+for i = 1:9
+    Vg = Vg_vals(3 + mod(i, 3));
+    if i <= 3
+        T  = T_vals(1);
+    elseif i > 3 && i <= 6
+        T  = T_vals(2);
+    else
+        T  = T_vals(3);
+    end
+
+    color = [0.1 * randi([0,10]), 0.2 * randi([0,5]), 0.1 * randi([0,10])];
+    not_nan_idx = ~isnan(del_VT(:,i));
+    scatter(stress_times(not_nan_idx), del_VT(not_nan_idx,i),[], color, 'filled','DisplayName', '');
+    hold on;
+    grid on;
+    set(gca,'xscale','log'); 
+    set(gca,'yscale','log');
+    plot(stress_times, data_fitted(:,i), '-','Color', color, 'DisplayName',...
+        "Fitted Data - V_g = " + Vg + ", Temp (in C): " + (T - 273));
+    legend('-DynamicLegend', 'location', 'best','FontSize',7);
+end   
+
+xlabel('Stress time(s)', 'interpreter', 'latex');
+ylabel("$\Delta V_{IT}(V)$",  'interpreter', 'latex');
+title("$\Delta V_{IT}$ vs Stress time",  'interpreter', 'latex');
+xlim padded;
+
+
